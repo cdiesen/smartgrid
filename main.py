@@ -2,89 +2,81 @@ import math
 import pandas as pd
 import numpy as np
 from scipy.optimize import minimize
-"""
-this program uses the lagrange relaxation method to solve the UC problem for a 168 hour period with 11 generators.
-the data is taken from the excel file UC.xlsx, which contains the data for the 11 generators, the load at each time
-interval, and the initial values for the lagrange multipliers the data is read from the excel file and stored in the
-appropriate variables
-"""
 
-original_data = pd.read_excel('UC.xlsx')
-sheet = original_data.get_sheet_by_name('gendata')
-sheet2 = original_data.get_sheet_by_name('load')
-
-# the lagrange multipliers are initialized to 0
-lmbd = [0 for i in range(168)]
-pmin = []
-pmax = []
-a = []
-b = []
-c = []
-F = []
-P = []
-U = []
-PED = []
-Fprime = []
-J = 0
-q = 0
-
-load = []
-PUsum = 0
-
-for i in range(168):
-    load[i] = sheet2.cell(row=i + 2, column=2).value
-    for j in range(11):
-        pmin[j] = sheet.cell(row=j + 2, column=4).value
-        pmax[j] = sheet.cell(row=j + 2, column=3).value
-        a[j] = sheet.cell(row=j + 2, column=5).value
-        b[j] = sheet.cell(row=j + 2, column=6).value
-        c[j] = sheet.cell(row=j + 2, column=7).value
-        P[j] = max(min(max((lmbd[j]-b[j])/(2 * c[j]), 0), pmax[j]), pmin[j])
-        F[j] = a[j] + b[j] * P[j] + c[j] * P[j] ^ 2
-        Fprime[j] = b[j] + 2 * c[j] * P[j]
-        U[j] = 1 - min(max((F[j] - lmbd[j]*P[j]), 0), 1)
-        PUsum += P[j] * U[j]
-        if PUsum > 0:
-            lmbd[j] += 0.01*PUsum
-    PED[j] = True if load[j] < PUsum else False
-    if PED[j]:
-        # Economic dispatch is required if Pload < P*U for all generators
-        # and the values of the generators' power, using economic dispatch.
-        # use mixed integer linear programming to optimize PED
-        # PED is the new power for each generator after economic dispatch
-
-def objective(x):
+def lagrange_relaxation_UC_ED(filename, max_iter=1000, tol=0.001):
     """
-    Objective function to minimize the total cost of power generation
+    Solves the unit commitment and economic dispatch problem using the Lagrange relaxation method.
+    Inputs:
+        filename: the name of the Excel file containing the input data.
+        max_iter: the maximum number of iterations to perform.
+        tol: the convergence tolerance.
+    Outputs:
+        J_star: the optimal objective function value.
+        q_star: the optimal total power generation.
     """
-    return sum([a[i] + b[i] * x[i] + c[i] * x[i] ** 2 for i in range(len(x))])
+    # Read data from Excel file.
+    original_data = pd.read_excel(filename)
+    sheet = original_data.get_sheet_by_name('gendata')
+    pmin = [sheet.cell(row=i+2, column=4).value for i in range(11)]
+    pmax = [sheet.cell(row=i+2, column=3).value for i in range(11)]
+    a = [sheet.cell(row=i+2, column=5).value for i in range(11)]
+    b = [sheet.cell(row=i+2, column=6).value for i in range(11)]
+    c = [sheet.cell(row=i+2, column=7).value for i in range(11)]
+    sheet2 = original_data.get_sheet_by_name('load')
+    load = [sheet2.cell(row=i+2, column=2).value for i in range(168)]
+
+    # Initialize Lagrange multipliers to zero.
+    lmbd = [[0 for j in range(11)] for i in range(168)]
+
+    # Initialize generator power outputs and penalty factors.
+    P = [[0 for j in range(11)] for i in range(168)]
+    U = [[0 for j in range(11)] for i in range(168)]
+    PED = [[0 for j in range(11)] for i in range(168)]
 
 
-def constraint(x):
+    # Calculate initial Lagrangian and objective function values.
+    J = 0
+    q = 0
+    for i in range(168):
+        PUsum = sum(P[i][j]*U[i][j] for j in range(11))
+        if PUsum < load[i]:
+            economic_dispatch(F, lmbd[i], load[i], P[i])
+        else:
+            J += 10000
+        for j in range(11):
+            P[i][j] = max(min(max((lmbd[i][j]-b[j])/(2 * c[j]), 0), pmax[j]), pmin[j])
+            F = a[j] + b[j] * P[i][j] + c[j] * P[i][j] ** 2
+            Fprime = b[j] + 2 * c[j] * P[i][j]
+            U[i][j] = 1 - min(max((F - lmbd[i][j]*P[i][j]), 0), 1)
+            PUsum += P[i][j] * U[i][j]
+        q += PUsum
+
+    # Iterate until convergence or maximum number of iterations is reached.
+    for k in range(max_iter):
+        # Update Lagrange multipliers.
+        for i in range(168):
+            PUsum = sum(P[i][j]*U[i][j] for j in range(11))
+            if PED[i]:
+                lmbd[i] += 0.01*(load[i] - PUsum)
+            else:
+                lmbd[i] -= 0.01*(PUsum - load[i])
+
+        # Calculate updated generator power outputs
+
+def calculate_Jq(P, F, lmbd, load, PED):
+    # Calculate q* and J*
+    q_star = 0
+    for i in range(len(load)):
+        if PED[i]:
+            q_star += max(load[i] - sum([P[j] for j in range(len(P)) if PED[j]]), 0)
+    J_star = sum(F) + sum([lmbd[i] * q_star for i in range(len(lmbd))])
+    return J_star, q_star
+
+def economic_dispatch(F, lmbd, load, P):
     """
-    Constraint function that ensures the total power generated meets the load demand
+    Solves the economic dispatch problem. There are 11 generators per each economic dispatch problem.
+    Inputs:
+        F: the cost function for each generator.
+        lmbd: the Lagrange multiplier.
+        load: the load value.
     """
-    return sum(x) - sum([load[i] for i in range(len(load))])
-
-
-cons = {'type': 'eq', 'fun': constraint}
-bnds = [(pmin[i], pmax[i]) for i in range(len(pmin))]
-
-while True:
-    # Solve the Economic Dispatch problem using a convex optimization solver
-    result = minimize(objective, P, bounds=bnds, constraints=cons)
-    PED = result.x
-
-    # Check if the Economic Dispatch solution satisfies the load demand
-    if sum(PED) >= sum(load):
-        P = PED
-        break
-
-    # If not, update the Lagrange multipliers and try again
-    for j in range(11):
-        F[j] = a[j] + b[j] * PED[j] + c[j] * PED[j] ** 2
-        Fprime[j] = b[j] + 2 * c[j] * PED[j]
-        U[j] = 1 - min(max((F[j] - lmbd[j] * PED[j]), 0), 1)
-        lmbd[j] += 0.01 * (sum(PED) - sum(load)) * U[j]
-
-P = [PED[i] if PED[i] else P[i] for i in range(len(P))]
