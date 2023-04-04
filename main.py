@@ -3,38 +3,40 @@ import pandas as pd
 import numpy as np
 from scipy.optimize import minimize
 
-def lagrange_relaxation_UC_ED(filename, max_iter=1000, tol=0.001):
+original_data = pd.read_excel('UC.xlsx')
+sheet = original_data.get_sheet_by_name('gendata')
+pmin = [sheet.cell(row=i + 2, column=4).value for i in range(11)]
+pmax = [sheet.cell(row=i + 2, column=3).value for i in range(11)]
+a = [sheet.cell(row=i + 2, column=5).value for i in range(11)]
+b = [sheet.cell(row=i + 2, column=6).value for i in range(11)]
+c = [sheet.cell(row=i + 2, column=7).value for i in range(11)]
+sheet2 = original_data.get_sheet_by_name('load')
+load = [sheet2.cell(row=i + 2, column=2).value for i in range(168)]
+def lagrange_relaxation_UC_ED(max_iter=1000, tol=0.001):
     """
     Solves the unit commitment and economic dispatch problem using the Lagrange relaxation method.
     Inputs:
-        filename: the name of the Excel file containing the input data.
         max_iter: the maximum number of iterations to perform.
         tol: the convergence tolerance.
     Outputs:
+        PED: the power output after economic dispatch.
         J_star: the optimal objective function value.
         q_star: the optimal total power generation.
     """
     # Read data from Excel file.
-    original_data = pd.read_excel(filename)
-    sheet = original_data.get_sheet_by_name('gendata')
-    pmin = [sheet.cell(row=i+2, column=4).value for i in range(11)]
-    pmax = [sheet.cell(row=i+2, column=3).value for i in range(11)]
-    a = [sheet.cell(row=i+2, column=5).value for i in range(11)]
-    b = [sheet.cell(row=i+2, column=6).value for i in range(11)]
-    c = [sheet.cell(row=i+2, column=7).value for i in range(11)]
-    sheet2 = original_data.get_sheet_by_name('load')
-    load = [sheet2.cell(row=i+2, column=2).value for i in range(168)]
 
     # Initialize Lagrange multipliers to zero.
-    lmbd = [[0 for j in range(11)] for i in range(168)]
+    lmbd = [load[i]*0.01 for i in range(168)]
 
-    # Initialize generator power outputs and penalty factors.
+    # Initialize flag for economic dispatch needed to False.
+    PED_needed = [False for i in range(168)]
+
+    # Initialize generator power outputs to zero, unit commitment variables to zero (off), and
+    # power output after economic dispatch to zero.
     P = [[0 for j in range(11)] for i in range(168)]
     U = [[0 for j in range(11)] for i in range(168)]
     PED = [[0 for j in range(11)] for i in range(168)]
 
-
-    # Calculate initial Lagrangian and objective function values.
     J = 0
     q = 0
     for i in range(168):
@@ -80,3 +82,5 @@ def economic_dispatch(F, lmbd, load, P):
         lmbd: the Lagrange multiplier.
         load: the load value.
     """
+
+
