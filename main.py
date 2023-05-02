@@ -31,7 +31,7 @@ def lagrange_relaxation_UC_ED(max_iter=100, tol=0.001, J=0, q=0):
     # Read data from Excel file.
 
     # Initialize Lagrange multipliers to zero.
-    lmbd = [load[i]/10 for i in range(168)]
+    lmbd = [load[i]/100 for i in range(168)]
 
     # # Initialize flag for economic dispatch needed to False.
     # PED_needed = [False for i in range(168)]
@@ -126,9 +126,9 @@ def lagrange_relaxation_UC_ED_iteration(lmbd, tol=0.001, max_iter=1000, J_iter=0
     opt_iter = (J_iter - q_iter) / q_iter
     for i in range(168):
         if load[i] > PUsum[i]:
-            lmbd[i] += 0.1 * (load[i] - PUsum[i])
+            lmbd[i] += 0.01 * (load[i] - PUsum[i])
         else:
-            lmbd[i] -= 0.02 * (load[i] - PUsum[i])
+            lmbd[i] -= 0.002 * (load[i] - PUsum[i])
     return opt_iter, J_iter, q_iter, PED, lmbd
 
 def economic_dispatch(b, c, U, Pmin, Pmax, load, tol=0.001):
