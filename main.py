@@ -31,7 +31,7 @@ def lagrange_relaxation_UC_ED(max_iter=100, tol=0.001, J=0, q=0):
     # Read data from Excel file.
 
     # Initialize Lagrange multipliers to zero.
-    lmbd = [load[i] for i in range(168)]
+    lmbd = [load[i]/10 for i in range(168)]
 
     # # Initialize flag for economic dispatch needed to False.
     # PED_needed = [False for i in range(168)]
@@ -55,10 +55,8 @@ def lagrange_relaxation_UC_ED(max_iter=100, tol=0.001, J=0, q=0):
             F[i][j] = cost_function(P[i][j], a[j], b[j], c[j])
             Fprime[i][j] = cost_function_derivative(P[i][j], b[j], c[j])
             PUsum[i] += P[i][j]
-        FPrimeMax = max(Fprime[i])
-        FPrimeMin = min(Fprime[i])
         if load[i] < PUsum[i] or (P[i][j] > 0 for j in range(11)):
-            PED[i], _ = economic_dispatch(a, b, c, U, pmin, pmax, load[i])
+            PED[i], _ = economic_dispatch(b, c, U[i], pmin, pmax, load[i])
 #            print(PED[i])
             J = J + sum(cost_function(PED[i][j], a[j], b[j], c[j]) for j in range(11))
             # Update the generator penalty array
@@ -76,13 +74,12 @@ def lagrange_relaxation_UC_ED(max_iter=100, tol=0.001, J=0, q=0):
         if load[i] > PUsum[i]:
             lmbd[i] = lmbd[i] + 0.1 * (load[i] - PUsum[i])
         else:
-            lmbd[i] = lmbd[i] + 0.02 * (load[i] - PUsum[i])
+            lmbd[i] = lmbd[i] - 0.02 * (load[i] - PUsum[i])
     for _ in range(max_iter):
         opt_new, J_new, q_new, PED_new, lmbd_new = lagrange_relaxation_UC_ED_iteration(lmbd, tol, max_iter)
         for i in range(168):
             print(PED_new[i])
         print(opt_new, J_new, q_new)
-        lmbd = lmbd_new
         if abs(opt_new) < tol:
             print('Converged after', _, 'iterations.')
             print('Objective function value:', J_new)
@@ -110,12 +107,8 @@ def lagrange_relaxation_UC_ED_iteration(lmbd, tol=0.001, max_iter=1000, J_iter=0
             F[i][j] = cost_function(P[i][j], a[j], b[j], c[j])
             Fprime[i][j] = cost_function_derivative(P[i][j], b[j], c[j])
             PUsum[i] += P[i][j]
-
-            FPrimeMax = max(Fprime[i])
-            FPrimeMin = min(Fprime[i])
-
         if load[i] < PUsum[i] or (P[i][j] > 0 for j in range(11)):
-            PED[i], _ = economic_dispatch(a, b, c, U, pmin, pmax, load[i])
+            PED[i], _ = economic_dispatch(b, c, U[i], pmin, pmax, load[i])
 #            print(PED[i])
             J_iter = J_iter + sum(cost_function(PED[i][j], a[j], b[j], c[j]) for j in range(11))
             # Update the generator penalty array
@@ -123,43 +116,39 @@ def lagrange_relaxation_UC_ED_iteration(lmbd, tol=0.001, max_iter=1000, J_iter=0
                 if PED[i][j] > 0:
                     gen_periods_up[j] += 1
         else:
-            J_iter += 100000  # Add penalty for not meeting load demand, equal to 10000.
+            J_iter += 10000  # Add penalty for not meeting load demand, equal to 10000.
         q_iter = q_iter + sum(cost_function(P[i][j], a[j], b[j], c[j]) for j in range(11))
     q_iter = q_iter + sum((lmbd[i]) * (load[i] - PUsum[i]) for i in range(168))
-
     # Update the Lagrange multipliers (lmbd) inside this function
-    lmbd_new = [lmbd[i] for i in range(168)]
     # Add a soft constraint for generator up-time by penalizing the objective function
-    penalty_weight = 100000000  # Adjust the penalty weight to balance the constraint importance
-    J_iter += penalty_weight * sum(max(1 - gen_periods_up[j], 0) for j in range(11))
+#    penalty_weight = 100000000  # Adjust the penalty weight to balance the constraint importance
+#    J_iter += penalty_weight * sum(max(1 - gen_periods_up[j], 0) for j in range(11))
     opt_iter = (J_iter - q_iter) / q_iter
     for i in range(168):
         if load[i] > PUsum[i]:
             lmbd[i] += 0.1 * (load[i] - PUsum[i])
         else:
-            lmbd[i] += 0.02 * (load[i] - PUsum[i])
+            lmbd[i] -= 0.02 * (load[i] - PUsum[i])
     return opt_iter, J_iter, q_iter, PED, lmbd
 
-def economic_dispatch(a, b, c, U, Pmin, Pmax, load, tol=0.0001):
+def economic_dispatch(b, c, U, Pmin, Pmax, load, tol=0.001):
     n_gens = 11
     lmbd_min = min([b[i] + 2 * c[i] * Pmin[i] for i in range(n_gens) if U[i]])  # Fixed the indexing issue
     lmbd_max = max([b[i] + 2 * c[i] * Pmax[i] for i in range(n_gens) if U[i]])  # Fixed the indexing issue
-    lmbd = (lmbd_min + lmbd_max) / 2
+    lmbda = (lmbd_min + lmbd_max) / 2
     delta_lambda = (lmbd_max - lmbd_min) / 2
 
     while delta_lambda > tol:
-        P = [max(min(((lmbd - b[i]) / (2 * c[i])), Pmax[i]), Pmin[i]) if U[i] else 0 for i in range(n_gens)]
+        P = [max(min(((lmbda - b[i]) / (2 * c[i])), Pmax[i]), Pmin[i]) if U[i] else 0 for i in range(n_gens)]
         PUsum = sum(P)
-
         if PUsum < load:
-            lmbd = lmbd + delta_lambda
+            lmbda = lmbda + delta_lambda
         else:
-            lmbd = lmbd - delta_lambda
-
+            lmbda = lmbda - delta_lambda
         delta_lambda /= 2
 
-    PED = [max(min(((lmbd - b[i]) / (2 * c[i])), Pmax[i]), Pmin[i]) if U[i] else 0 for i in range(n_gens)]
-    return PED, lmbd
+    PED = [max(min(((lmbda - b[i]) / (2 * c[i])), Pmax[i]), Pmin[i]) if U[i] else 0 for i in range(n_gens)]
+    return PED, lmbda
 
 def cost_function(p, a, b, c):
     """
@@ -172,7 +161,7 @@ def cost_function(p, a, b, c):
     Outputs:
         F: the total cost of power generation.
     """
-    f = a + b * p + c * p ** 2
+    f = a + p*b + (p**2)*c
     return f
 
 
@@ -186,7 +175,7 @@ def cost_function_derivative(p, b, c):
     Outputs:
         Fprime: the derivative of the total cost of power generation.
     """
-    fprime = b + 2 * c * p
+    fprime = b + 2*c*p
     return fprime
 
 
